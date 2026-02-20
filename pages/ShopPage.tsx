@@ -5,7 +5,16 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
-import { Search, Filter, Package } from 'lucide-react';
+import { Search, Filter, Package, X } from 'lucide-react';
+
+const COLORS = ['Black', 'White', 'Blue', 'Grey', 'Brown', 'Red', 'Green', 'Navy', 'Beige'];
+const PRICE_RANGES = [
+  { label: 'Under $50', min: 0, max: 50 },
+  { label: '$50 – $100', min: 50, max: 100 },
+  { label: '$100 – $200', min: 100, max: 200 },
+  { label: '$200 – $500', min: 200, max: 500 },
+  { label: 'Above $500', min: 500, max: Infinity },
+];
 
 const ShopPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -13,6 +22,11 @@ const ShopPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+
+  // Filter states
+  const [selectedColors, setSelectedColors] = useState<string[]>([]);
+  const [selectedPriceRange, setSelectedPriceRange] = useState<number | null>(null);
+  const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
 
   const activeCategory = searchParams.get('category') as Category | null;
 
@@ -25,8 +39,7 @@ const ShopPage: React.FC = () => {
         const sorted = allProducts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
         if (activeCategory) {
-          // Case-insensitive filtering to ensure 'shirts' matches 'Shirts'
-          const filtered = sorted.filter(p => 
+          const filtered = sorted.filter(p =>
             p.category?.toLowerCase() === activeCategory.toLowerCase()
           );
           setProducts(filtered);
@@ -40,11 +53,61 @@ const ShopPage: React.FC = () => {
       }
     };
     fetchProducts();
+    // Reset filters on category change
+    setSelectedColors([]);
+    setSelectedPriceRange(null);
+    setSelectedSizes([]);
   }, [activeCategory]);
 
-  const filteredProducts = products.filter(p => 
-    p.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Collect all unique sizes from current products
+  const allSizes = Array.from(new Set(products.flatMap(p => p.sizes || []))).sort();
+
+  const toggleColor = (color: string) => {
+    setSelectedColors(prev =>
+      prev.includes(color) ? prev.filter(c => c !== color) : [...prev, color]
+    );
+  };
+
+  const toggleSize = (size: string) => {
+    setSelectedSizes(prev =>
+      prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size]
+    );
+  };
+
+  const resetFilters = () => {
+    setSelectedColors([]);
+    setSelectedPriceRange(null);
+    setSelectedSizes([]);
+    setSearchTerm('');
+  };
+
+  const hasActiveFilters = selectedColors.length > 0 || selectedPriceRange !== null || selectedSizes.length > 0 || searchTerm !== '';
+
+  const filteredProducts = products.filter(p => {
+    // Search
+    if (searchTerm && !p.name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+    // Color filter — match color name in product name or description
+    if (selectedColors.length > 0) {
+      const haystack = `${p.name} ${p.description}`.toLowerCase();
+      const match = selectedColors.some(c => haystack.includes(c.toLowerCase()));
+      if (!match) return false;
+    }
+
+    // Price range
+    if (selectedPriceRange !== null) {
+      const range = PRICE_RANGES[selectedPriceRange];
+      if (p.price < range.min || p.price > range.max) return false;
+    }
+
+    // Size filter
+    if (selectedSizes.length > 0) {
+      const hasSize = selectedSizes.some(s => (p.sizes || []).includes(s));
+      if (!hasSize) return false;
+    }
+
+    return true;
+  });
 
   const categories: { id: Category | ''; label: string }[] = [
     { id: '', label: 'All Pieces' },
@@ -57,24 +120,27 @@ const ShopPage: React.FC = () => {
 
   return (
     <div className="pt-32 pb-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-      {/* Header aligned to the RIGHT side */}
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-16 gap-8">
         <div className="flex items-center gap-4 w-full md:w-auto">
           <div className="relative flex-1 md:w-72">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={18} />
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="SEARCH THE ARCHIVE..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-zinc-900 border-b border-zinc-800 py-4 pl-12 pr-4 text-[10px] uppercase tracking-[0.2em] focus:outline-none focus:border-amber-400 text-white transition-all"
             />
           </div>
-          <button 
+          <button
             onClick={() => setShowFilters(!showFilters)}
-            className={`p-4 bg-zinc-900 border transition-all ${showFilters ? 'border-amber-400 text-amber-400' : 'border-zinc-800 text-zinc-500'}`}
+            className={`p-4 bg-zinc-900 border transition-all relative ${showFilters ? 'border-amber-400 text-amber-400' : 'border-zinc-800 text-zinc-500'}`}
           >
             <Filter size={20} />
+            {hasActiveFilters && (
+              <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full" />
+            )}
           </button>
         </div>
 
@@ -89,20 +155,23 @@ const ShopPage: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-16">
-        <aside className={`${showFilters ? 'block' : 'hidden'} lg:block space-y-12`}>
+        {/* Sidebar */}
+        <aside className={`${showFilters ? 'block' : 'hidden'} lg:block space-y-10`}>
+
+          {/* Category Filter */}
           <div>
-            <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-8 text-amber-400 border-b border-zinc-800 pb-2">Filter Category</h4>
-            <div className="flex flex-col space-y-5">
+            <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Category</h4>
+            <div className="flex flex-col space-y-4">
               {categories.map((cat) => (
-                <button 
+                <button
                   key={cat.id}
                   onClick={() => {
                     cat.id === '' ? setSearchParams({}) : setSearchParams({ category: cat.id });
                     if (window.innerWidth < 1024) setShowFilters(false);
                   }}
                   className={`text-[10px] text-left uppercase tracking-[0.2em] transition-all font-bold ${
-                    (cat.id === '' && !activeCategory) || cat.id?.toLowerCase() === activeCategory?.toLowerCase() 
-                      ? 'text-amber-400 pl-2 border-l-2 border-amber-400' 
+                    (cat.id === '' && !activeCategory) || cat.id?.toLowerCase() === activeCategory?.toLowerCase()
+                      ? 'text-amber-400 pl-2 border-l-2 border-amber-400'
                       : 'text-zinc-500 hover:text-white pl-0 border-l-0 border-transparent'
                   }`}
                 >
@@ -111,15 +180,89 @@ const ShopPage: React.FC = () => {
               ))}
             </div>
           </div>
-          
-          <div className="p-8 bg-zinc-900/50 border border-zinc-800">
-             <h4 className="text-[10px] uppercase tracking-widest font-black mb-4 text-amber-400">Editorial Note</h4>
-             <p className="text-[10px] text-zinc-500 leading-relaxed italic">
-                Only items meeting our quality standards for silhouette and material are curated into the archive.
-             </p>
+
+          {/* Color Filter */}
+          <div>
+            <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Color</h4>
+            <div className="flex flex-wrap gap-2">
+              {COLORS.map(color => (
+                <button
+                  key={color}
+                  onClick={() => toggleColor(color)}
+                  className={`text-[9px] uppercase tracking-widest px-3 py-1.5 border transition-all font-bold ${
+                    selectedColors.includes(color)
+                      ? 'border-amber-400 text-amber-400 bg-amber-400/10'
+                      : 'border-zinc-700 text-zinc-500 hover:border-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {color}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Price Range Filter */}
+          <div>
+            <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Price Range</h4>
+            <div className="flex flex-col space-y-3">
+              {PRICE_RANGES.map((range, i) => (
+                <button
+                  key={i}
+                  onClick={() => setSelectedPriceRange(selectedPriceRange === i ? null : i)}
+                  className={`text-[10px] text-left uppercase tracking-[0.2em] transition-all font-bold ${
+                    selectedPriceRange === i
+                      ? 'text-amber-400 pl-2 border-l-2 border-amber-400'
+                      : 'text-zinc-500 hover:text-white pl-0 border-l-0 border-transparent'
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Size Filter */}
+          {allSizes.length > 0 && (
+            <div>
+              <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Size</h4>
+              <div className="flex flex-wrap gap-2">
+                {allSizes.map(size => (
+                  <button
+                    key={size}
+                    onClick={() => toggleSize(size)}
+                    className={`text-[9px] uppercase tracking-widest w-10 h-10 border transition-all font-bold ${
+                      selectedSizes.includes(size)
+                        ? 'border-amber-400 text-amber-400 bg-amber-400/10'
+                        : 'border-zinc-700 text-zinc-500 hover:border-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Reset Filters */}
+          {hasActiveFilters && (
+            <button
+              onClick={resetFilters}
+              className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-red-400 hover:text-red-300 font-bold transition-all"
+            >
+              <X size={12} /> Clear All Filters
+            </button>
+          )}
+
+          {/* Editorial Note */}
+          <div className="p-6 bg-zinc-900/50 border border-zinc-800">
+            <h4 className="text-[10px] uppercase tracking-widest font-black mb-3 text-amber-400">Editorial Note</h4>
+            <p className="text-[10px] text-zinc-500 leading-relaxed italic">
+              Only items meeting our quality standards for silhouette and material are curated into the archive.
+            </p>
           </div>
         </aside>
 
+        {/* Products Grid */}
         <div className="lg:col-span-3">
           {loading ? (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-10">
@@ -133,9 +276,14 @@ const ShopPage: React.FC = () => {
             </div>
           ) : filteredProducts.length === 0 ? (
             <div className="py-32 text-center space-y-8 border border-zinc-800 border-dashed bg-zinc-900/10">
-               <Package size={48} className="mx-auto text-zinc-800" />
-               <p className="text-zinc-500 italic text-sm tracking-widest">NO RECORDS MATCH THE CURRENT FILTER.</p>
-               <button onClick={() => { setSearchTerm(''); setSearchParams({}); }} className="px-10 py-4 bg-zinc-800 text-white uppercase tracking-widest text-[10px] font-bold hover:bg-zinc-700">RESET VIEW</button>
+              <Package size={48} className="mx-auto text-zinc-800" />
+              <p className="text-zinc-500 italic text-sm tracking-widest">NO RECORDS MATCH THE CURRENT FILTER.</p>
+              <button
+                onClick={() => { resetFilters(); setSearchParams({}); }}
+                className="px-10 py-4 bg-zinc-800 text-white uppercase tracking-widest text-[10px] font-bold hover:bg-zinc-700"
+              >
+                RESET VIEW
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-10">
@@ -151,3 +299,4 @@ const ShopPage: React.FC = () => {
 };
 
 export default ShopPage;
+                    
