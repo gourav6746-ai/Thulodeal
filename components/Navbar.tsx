@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingBag, User, LogOut, Menu, X, ShieldCheck } from 'lucide-react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { ShoppingBag, LogOut, Menu, X, ShieldCheck, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import CartDrawer from './CartDrawer';
@@ -12,11 +11,24 @@ const Navbar: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = async () => {
     await logout();
     navigate('/');
   };
+
+  const isActive = (path: string) => {
+    if (path === '/shop') return location.pathname === '/shop' || location.search.includes('category');
+    return location.pathname === path;
+  };
+
+  const navLinks = [
+    { to: '/shop', label: 'Shop All' },
+    { to: '/shop?category=shirts', label: 'Shirts' },
+    { to: '/shop?category=jeans', label: 'Jeans' },
+    { to: '/shop?category=shoes', label: 'Shoes' },
+  ];
 
   return (
     <>
@@ -36,10 +48,17 @@ const Navbar: React.FC = () => {
             </div>
 
             <div className="hidden md:flex items-center space-x-8">
-              <Link to="/shop" className="text-[10px] uppercase tracking-widest hover:text-amber-400 transition-colors">Shop All</Link>
-              <Link to="/shop?category=shirts" className="text-[10px] uppercase tracking-widest hover:text-amber-400 transition-colors">Shirts</Link>
-              <Link to="/shop?category=jeans" className="text-[10px] uppercase tracking-widest hover:text-amber-400 transition-colors">Jeans</Link>
-              <Link to="/shop?category=shoes" className="text-[10px] uppercase tracking-widest hover:text-amber-400 transition-colors">Shoes</Link>
+              {navLinks.map(link => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={`text-[10px] uppercase tracking-widest transition-colors ${
+                    isActive(link.to) ? 'text-amber-400 border-b border-amber-400 pb-0.5' : 'hover:text-amber-400'
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              ))}
             </div>
 
             <div className="flex items-center space-x-5">
@@ -50,15 +69,29 @@ const Navbar: React.FC = () => {
               )}
               <button onClick={() => setIsCartOpen(true)} className="relative text-zinc-300 hover:text-white">
                 <ShoppingBag size={22} />
-                {cartCount > 0 && <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[10px] font-bold h-4 w-4 rounded-full flex items-center justify-center">{cartCount}</span>}
+                {cartCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[10px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
+                    {cartCount}
+                  </span>
+                )}
               </button>
               {currentUser ? (
                 <div className="flex items-center space-x-4">
-                  <Link to="/orders" className="text-zinc-300 hover:text-white hidden sm:block"><User size={22} /></Link>
-                  <button onClick={handleLogout} className="text-zinc-300 hover:text-white"><LogOut size={22} /></button>
+                  <Link
+                    to="/profile"
+                    className={`hidden sm:block transition-colors ${location.pathname === '/profile' ? 'text-amber-400' : 'text-zinc-300 hover:text-white'}`}
+                    title="My Profile"
+                  >
+                    <UserCircle size={22} />
+                  </Link>
+                  <button onClick={handleLogout} className="text-zinc-300 hover:text-red-400 transition-colors">
+                    <LogOut size={22} />
+                  </button>
                 </div>
               ) : (
-                <Link to="/login" className="text-zinc-300 hover:text-white"><User size={22} /></Link>
+                <Link to="/login" className="text-zinc-300 hover:text-white">
+                  <UserCircle size={22} />
+                </Link>
               )}
             </div>
           </div>
@@ -66,12 +99,31 @@ const Navbar: React.FC = () => {
 
         {isMobileMenuOpen && (
           <div className="md:hidden bg-zinc-950 border-b border-zinc-800 px-4 py-6 space-y-4">
-            <Link to="/shop" className="block text-lg uppercase tracking-widest hover:text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>Shop All</Link>
-            <Link to="/shop?category=shirts" className="block text-lg uppercase tracking-widest hover:text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>Shirts</Link>
-            <Link to="/shop?category=jeans" className="block text-lg uppercase tracking-widest hover:text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>Jeans</Link>
-            <Link to="/shop?category=shoes" className="block text-lg uppercase tracking-widest hover:text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>Shoes</Link>
-            {isAdmin && <Link to="/admin" className="block text-lg uppercase tracking-widest text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>Admin Dashboard</Link>}
-            {currentUser && <Link to="/orders" className="block text-lg uppercase tracking-widest hover:text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>My Orders</Link>}
+            {navLinks.map(link => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className={`block text-lg uppercase tracking-widest ${isActive(link.to) ? 'text-amber-400' : 'hover:text-amber-400'}`}
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                {link.label}
+              </Link>
+            ))}
+            {isAdmin && (
+              <Link to="/admin" className="block text-lg uppercase tracking-widest text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>
+                Admin Dashboard
+              </Link>
+            )}
+            {currentUser && (
+              <>
+                <Link to="/profile" className="block text-lg uppercase tracking-widest hover:text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>
+                  My Profile
+                </Link>
+                <Link to="/orders" className="block text-lg uppercase tracking-widest hover:text-amber-400" onClick={() => setIsMobileMenuOpen(false)}>
+                  My Orders
+                </Link>
+              </>
+            )}
           </div>
         )}
       </nav>
