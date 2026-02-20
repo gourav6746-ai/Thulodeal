@@ -9,6 +9,35 @@ import { db, storage } from '../firebase/config';
 import { ChevronLeft, CheckCircle2, Upload, AlertCircle } from 'lucide-react';
 import { PaymentMethod, PaymentDetails } from '../types';
 
+// Helper: upload with timeout to prevent infinite hang
+const uploadWithTimeout = (storageRef: any, file: File, timeoutMs = 15000): Promise<string> => {
+  return new Promise(async (resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('Upload timed out. Please check your internet connection and try again.'));
+    }, timeoutMs);
+
+    try {
+      const result = await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(result.ref);
+      clearTimeout(timer);
+      resolve(url);
+    } catch (err) {
+      clearTimeout(timer);
+      reject(err);
+    }
+  });
+};
+
+// Helper: convert file to base64 (fallback if Storage fails)
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
 const CheckoutPage: React.FC = () => {
   const { cart, cartTotal, clearCart } = useCart();
   const { currentUser } = useAuth();
@@ -20,12 +49,13 @@ const CheckoutPage: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  
+  const [uploadStatus, setUploadStatus] = useState('');
+
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const finalTotal = cart.length >= 3 
+  const finalTotal = cart.length >= 3
     ? cartTotal - [...cart].sort((a, b) => a.price - b.price).slice(0, Math.floor(cart.length / 3)).reduce((sum, item) => sum + item.price, 0)
     : cartTotal;
 
@@ -43,9 +73,11 @@ const CheckoutPage: React.FC = () => {
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    setUploadStatus('');
+
     if (!currentUser) return alert("Please log in to finalize your acquisition.");
     if (cart.length === 0) return;
-    
+
     if (paymentMethod !== 'COD') {
       if (!paymentDetails.transactionId || !paymentDetails.senderId) {
         return alert("Please provide Transaction ID and Payer ID.");
@@ -56,19 +88,32 @@ const CheckoutPage: React.FC = () => {
     }
 
     setIsProcessing(true);
+
     try {
-      let url = '';
+      let screenshotURL = '';
+
       if (screenshotFile) {
+        // Try Firebase Storage first
         try {
-          // Using uploadBytes for simpler one-off upload without resumable task hang
+          setUploadStatus('Uploading payment proof...');
           const storageRef = ref(storage, `receipts/${currentUser.uid}_${Date.now()}.jpg`);
-          const result = await uploadBytes(storageRef, screenshotFile);
-          url = await getDownloadURL(result.ref);
-        } catch (uploadError) {
-          console.error("Storage Error:", uploadError);
-          throw new Error("Payment proof upload failed. Please try a smaller image or check your connection.");
+          screenshotURL = await uploadWithTimeout(storageRef, screenshotFile, 20000);
+          setUploadStatus('');
+        } catch (uploadError: any) {
+          console.warn("Firebase Storage failed, using base64 fallback:", uploadError.message);
+          // Fallback: store base64 in Firestore directly
+          // Compress/resize if needed — here we just use base64 of the file
+          setUploadStatus('Using backup method...');
+          try {
+            screenshotURL = await fileToBase64(screenshotFile);
+            setUploadStatus('');
+          } catch (b64Error) {
+            throw new Error("Could not process your screenshot. Please try a smaller image.");
+          }
         }
       }
+
+      setUploadStatus('Saving your order...');
 
       await addDoc(collection(db, 'orders'), {
         userId: currentUser.uid,
@@ -78,18 +123,20 @@ const CheckoutPage: React.FC = () => {
         status: 'Pending',
         paymentMethod,
         paymentStatus: paymentMethod === 'COD' ? 'Confirmed' : 'Submitted',
-        paymentDetails: { ...paymentDetails, screenshotURL: url },
+        paymentDetails: { ...paymentDetails, screenshotURL },
         shippingAddress: shippingInfo,
         createdAt: Date.now(),
       });
 
+      setUploadStatus('');
       setIsSuccess(true);
       clearCart();
       setTimeout(() => navigate('/orders'), 3000);
     } catch (error: any) {
       console.error(error);
+      setUploadStatus('');
       setErrorMessage(error.message || "Something went wrong. Please refresh and try again.");
-      setIsProcessing(false); // Reset processing state so button is clickable again
+      setIsProcessing(false);
     }
   };
 
@@ -146,10 +193,10 @@ const CheckoutPage: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {['COD', 'eSewa', 'Khalti', 'Binance'].map(m => (
-                <button 
-                  key={m} 
+                <button
+                  key={m}
                   type="button"
-                  onClick={() => { setPaymentMethod(m as any); setErrorMessage(''); }} 
+                  onClick={() => { setPaymentMethod(m as any); setErrorMessage(''); }}
                   className={`p-4 border text-[9px] font-black uppercase tracking-widest transition-all ${paymentMethod === m ? 'border-amber-400 bg-amber-400/5 text-amber-400' : 'border-zinc-800 text-zinc-600 hover:text-white'}`}
                 >
                   {m}
@@ -169,13 +216,13 @@ const CheckoutPage: React.FC = () => {
                     <p className="text-[8px] text-zinc-600 uppercase mt-4 tracking-widest font-bold">SCAN OR TRANSFER DIRECTLY</p>
                   </div>
                 </div>
-                
+
                 <div className="space-y-5">
                   <div className="space-y-2">
                     <label className="text-[9px] uppercase tracking-widest text-zinc-500 font-black">{getPayerLabel()}</label>
                     <input type="text" placeholder="e.g. 98XXXXXXXX / User ID" required value={paymentDetails.senderId} onChange={e => setPaymentDetails({...paymentDetails, senderId: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 p-4 text-xs text-white tracking-widest focus:border-amber-400" />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <label className="text-[9px] uppercase tracking-widest text-zinc-500 font-black">TRANSACTION ID (TXID)</label>
                     <input type="text" placeholder="Unique Transfer ID" required value={paymentDetails.transactionId} onChange={e => setPaymentDetails({...paymentDetails, transactionId: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 p-4 text-xs text-white tracking-widest focus:border-amber-400" />
@@ -186,10 +233,10 @@ const CheckoutPage: React.FC = () => {
                     <div onClick={() => fileInputRef.current?.click()} className="w-full bg-zinc-950 border-2 border-dashed border-zinc-800 p-10 flex flex-col items-center gap-3 cursor-pointer hover:border-amber-400/40 transition-all group">
                       {screenshotPreview ? (
                         <div className="relative w-full max-h-64 flex justify-center">
-                           <img src={screenshotPreview} className="max-h-64 object-contain shadow-2xl" alt="Preview" />
-                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                              <span className="text-[10px] uppercase tracking-widest text-white font-black">Change Image</span>
-                           </div>
+                          <img src={screenshotPreview} className="max-h-64 object-contain shadow-2xl" alt="Preview" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                            <span className="text-[10px] uppercase tracking-widest text-white font-black">Change Image</span>
+                          </div>
                         </div>
                       ) : (
                         <>
@@ -208,22 +255,22 @@ const CheckoutPage: React.FC = () => {
 
         <div className="lg:sticky lg:top-32 h-fit bg-zinc-900 border border-zinc-800 p-10 space-y-8 shadow-2xl">
           <h3 className="text-2xl font-serif italic text-white border-b border-zinc-800 pb-5 uppercase tracking-widest text-center">Invoiced Summary</h3>
-          
+
           <div className="space-y-4">
-             <div className="flex justify-between text-zinc-500 text-[10px] uppercase tracking-widest font-black">
-                <span>Gross Value</span>
-                <span>${cartTotal.toLocaleString()}</span>
-             </div>
-             {finalTotal !== cartTotal && (
-               <div className="flex justify-between text-green-500 text-[10px] uppercase tracking-widest font-black">
-                  <span>Acquisition Reward</span>
-                  <span>-${(cartTotal - finalTotal).toLocaleString()}</span>
-               </div>
-             )}
-             <div className="flex justify-between text-3xl font-serif text-white pt-6 border-t border-zinc-800">
-               <span>Total</span>
-               <span className="text-amber-400 font-bold tracking-tighter">${finalTotal.toLocaleString()}</span>
-             </div>
+            <div className="flex justify-between text-zinc-500 text-[10px] uppercase tracking-widest font-black">
+              <span>Gross Value</span>
+              <span>${cartTotal.toLocaleString()}</span>
+            </div>
+            {finalTotal !== cartTotal && (
+              <div className="flex justify-between text-green-500 text-[10px] uppercase tracking-widest font-black">
+                <span>Acquisition Reward</span>
+                <span>-${(cartTotal - finalTotal).toLocaleString()}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-3xl font-serif text-white pt-6 border-t border-zinc-800">
+              <span>Total</span>
+              <span className="text-amber-400 font-bold tracking-tighter">${finalTotal.toLocaleString()}</span>
+            </div>
           </div>
 
           {errorMessage && (
@@ -233,21 +280,23 @@ const CheckoutPage: React.FC = () => {
             </div>
           )}
 
-          <button 
-            form="checkout-form" 
-            type="submit" 
-            disabled={isProcessing} 
+          <button
+            form="checkout-form"
+            type="submit"
+            disabled={isProcessing}
             className="w-full py-6 bg-white text-black text-[10px] font-black uppercase tracking-[0.4em] hover:bg-amber-400 transition-all disabled:opacity-50 shadow-xl"
           >
-            {isProcessing ? 'SYNCHRONIZING...' : 'FINALIZE ACQUISITION'}
+            {isProcessing
+              ? (uploadStatus || 'PROCESSING...')
+              : 'FINALIZE ACQUISITION'}
           </button>
-          
+
           <div className="text-center">
             <p className="text-[8px] text-zinc-600 uppercase tracking-[0.3em] font-black">Encryption Enabled / Verified Settlement</p>
           </div>
         </div>
       </div>
-      
+
       <style>{`
         @keyframes fade-in {
           from { opacity: 0; transform: translateY(10px); }
@@ -260,3 +309,4 @@ const CheckoutPage: React.FC = () => {
 };
 
 export default CheckoutPage;
+                        
