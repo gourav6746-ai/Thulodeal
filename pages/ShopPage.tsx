@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Product, Category } from '../types';
 import ProductCard from '../components/ProductCard';
-import { Search, Filter, Package, X } from 'lucide-react';
+import { Search, Filter, Package, X, ChevronDown } from 'lucide-react';
 
 const COLORS = ['Black', 'White', 'Blue', 'Grey', 'Brown', 'Red', 'Green', 'Navy', 'Beige'];
 const PRICE_RANGES = [
@@ -15,6 +14,12 @@ const PRICE_RANGES = [
   { label: '$200 – $500', min: 200, max: 500 },
   { label: 'Above $500', min: 500, max: Infinity },
 ];
+const SORT_OPTIONS = [
+  { label: 'Newest First', value: 'newest' },
+  { label: 'Price: Low to High', value: 'price_asc' },
+  { label: 'Price: High to Low', value: 'price_desc' },
+  { label: 'Name: A–Z', value: 'name_asc' },
+];
 
 const ShopPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,11 +27,11 @@ const ShopPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-
-  // Filter states
   const [selectedColors, setSelectedColors] = useState<string[]>([]);
   const [selectedPriceRange, setSelectedPriceRange] = useState<number | null>(null);
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState('newest');
+  const [showSortDropdown, setShowSortDropdown] = useState(false);
 
   const activeCategory = searchParams.get('category') as Category | null;
 
@@ -37,77 +42,65 @@ const ShopPage: React.FC = () => {
         const snapshot = await getDocs(collection(db, 'products'));
         const allProducts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
         const sorted = allProducts.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
         if (activeCategory) {
-          const filtered = sorted.filter(p =>
-            p.category?.toLowerCase() === activeCategory.toLowerCase()
-          );
-          setProducts(filtered);
+          setProducts(sorted.filter(p => p.category?.toLowerCase() === activeCategory.toLowerCase()));
         } else {
           setProducts(sorted);
         }
       } catch (error) {
-        console.error("Error fetching products:", error);
+        console.error('Error fetching products:', error);
       } finally {
         setLoading(false);
       }
     };
     fetchProducts();
-    // Reset filters on category change
     setSelectedColors([]);
     setSelectedPriceRange(null);
     setSelectedSizes([]);
   }, [activeCategory]);
 
-  // Collect all unique sizes from current products
   const allSizes = Array.from(new Set(products.flatMap(p => p.sizes || []))).sort();
 
-  const toggleColor = (color: string) => {
-    setSelectedColors(prev =>
-      prev.includes(color) ? prev.filter(c => c !== color) : [...prev, color]
-    );
-  };
+  const toggleColor = (color: string) =>
+    setSelectedColors(prev => prev.includes(color) ? prev.filter(c => c !== color) : [...prev, color]);
 
-  const toggleSize = (size: string) => {
-    setSelectedSizes(prev =>
-      prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size]
-    );
-  };
+  const toggleSize = (size: string) =>
+    setSelectedSizes(prev => prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size]);
 
   const resetFilters = () => {
     setSelectedColors([]);
     setSelectedPriceRange(null);
     setSelectedSizes([]);
     setSearchTerm('');
+    setSortBy('newest');
   };
 
-  const hasActiveFilters = selectedColors.length > 0 || selectedPriceRange !== null || selectedSizes.length > 0 || searchTerm !== '';
+  const hasActiveFilters = selectedColors.length > 0 || selectedPriceRange !== null || selectedSizes.length > 0 || searchTerm !== '' || sortBy !== 'newest';
 
-  const filteredProducts = products.filter(p => {
-    // Search
-    if (searchTerm && !p.name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-
-    // Color filter — match color name in product name or description
-    if (selectedColors.length > 0) {
-      const haystack = `${p.name} ${p.description}`.toLowerCase();
-      const match = selectedColors.some(c => haystack.includes(c.toLowerCase()));
-      if (!match) return false;
-    }
-
-    // Price range
-    if (selectedPriceRange !== null) {
-      const range = PRICE_RANGES[selectedPriceRange];
-      if (p.price < range.min || p.price > range.max) return false;
-    }
-
-    // Size filter
-    if (selectedSizes.length > 0) {
-      const hasSize = selectedSizes.some(s => (p.sizes || []).includes(s));
-      if (!hasSize) return false;
-    }
-
-    return true;
-  });
+  const filteredProducts = products
+    .filter(p => {
+      if (searchTerm && !p.name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      if (selectedColors.length > 0) {
+        const haystack = `${p.name} ${p.description}`.toLowerCase();
+        if (!selectedColors.some(c => haystack.includes(c.toLowerCase()))) return false;
+      }
+      if (selectedPriceRange !== null) {
+        const range = PRICE_RANGES[selectedPriceRange];
+        if (p.price < range.min || p.price > range.max) return false;
+      }
+      if (selectedSizes.length > 0) {
+        if (!selectedSizes.some(s => (p.sizes || []).includes(s))) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'price_asc': return a.price - b.price;
+        case 'price_desc': return b.price - a.price;
+        case 'name_asc': return a.name.localeCompare(b.name);
+        default: return (b.createdAt || 0) - (a.createdAt || 0);
+      }
+    });
 
   const categories: { id: Category | ''; label: string }[] = [
     { id: '', label: 'All Pieces' },
@@ -117,6 +110,8 @@ const ShopPage: React.FC = () => {
     { id: 'jackets', label: 'Jackets' },
     { id: 'accessories', label: 'Accessories' },
   ];
+
+  const currentSortLabel = SORT_OPTIONS.find(o => o.value === sortBy)?.label || 'Sort';
 
   return (
     <div className="pt-32 pb-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
@@ -138,19 +133,43 @@ const ShopPage: React.FC = () => {
             className={`p-4 bg-zinc-900 border transition-all relative ${showFilters ? 'border-amber-400 text-amber-400' : 'border-zinc-800 text-zinc-500'}`}
           >
             <Filter size={20} />
-            {hasActiveFilters && (
-              <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full" />
-            )}
+            {hasActiveFilters && <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full" />}
           </button>
         </div>
 
-        <div className="w-full md:w-auto md:text-right">
-          <h1 className="text-6xl font-serif italic mb-2 text-white leading-tight">
+        <div className="w-full md:w-auto md:text-right flex flex-col md:items-end gap-3">
+          <h1 className="text-6xl font-serif italic mb-0 text-white leading-tight">
             {activeCategory ? activeCategory.charAt(0).toUpperCase() + activeCategory.slice(1) : 'Collection'}
           </h1>
-          <p className="text-zinc-500 uppercase tracking-[0.4em] text-[10px] font-black">
-            Archive Inventory / {filteredProducts.length} Selected
-          </p>
+          <div className="flex items-center gap-4 justify-end">
+            <p className="text-zinc-500 uppercase tracking-[0.4em] text-[10px] font-black">
+              {filteredProducts.length} Selected
+            </p>
+            {/* Sort Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSortDropdown(!showSortDropdown)}
+                className="flex items-center gap-2 text-[9px] uppercase tracking-widest font-black text-zinc-400 hover:text-amber-400 border border-zinc-800 px-3 py-2 transition-all"
+              >
+                {currentSortLabel} <ChevronDown size={10} />
+              </button>
+              {showSortDropdown && (
+                <div className="absolute right-0 top-full mt-1 bg-zinc-900 border border-zinc-800 z-50 min-w-[160px] shadow-2xl">
+                  {SORT_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setSortBy(opt.value); setShowSortDropdown(false); }}
+                      className={`block w-full text-left px-4 py-3 text-[9px] uppercase tracking-widest font-black transition-all ${
+                        sortBy === opt.value ? 'text-amber-400 bg-amber-400/5' : 'text-zinc-500 hover:text-white hover:bg-zinc-800'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -158,7 +177,7 @@ const ShopPage: React.FC = () => {
         {/* Sidebar */}
         <aside className={`${showFilters ? 'block' : 'hidden'} lg:block space-y-10`}>
 
-          {/* Category Filter */}
+          {/* Category */}
           <div>
             <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Category</h4>
             <div className="flex flex-col space-y-4">
@@ -181,7 +200,7 @@ const ShopPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Color Filter */}
+          {/* Color */}
           <div>
             <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Color</h4>
             <div className="flex flex-wrap gap-2">
@@ -201,7 +220,7 @@ const ShopPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Price Range Filter */}
+          {/* Price Range */}
           <div>
             <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Price Range</h4>
             <div className="flex flex-col space-y-3">
@@ -221,7 +240,7 @@ const ShopPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Size Filter */}
+          {/* Size */}
           {allSizes.length > 0 && (
             <div>
               <h4 className="text-[11px] uppercase tracking-[0.3em] font-black mb-6 text-amber-400 border-b border-zinc-800 pb-2">Size</h4>
@@ -243,7 +262,6 @@ const ShopPage: React.FC = () => {
             </div>
           )}
 
-          {/* Reset Filters */}
           {hasActiveFilters && (
             <button
               onClick={resetFilters}
@@ -253,7 +271,6 @@ const ShopPage: React.FC = () => {
             </button>
           )}
 
-          {/* Editorial Note */}
           <div className="p-6 bg-zinc-900/50 border border-zinc-800">
             <h4 className="text-[10px] uppercase tracking-widest font-black mb-3 text-amber-400">Editorial Note</h4>
             <p className="text-[10px] text-zinc-500 leading-relaxed italic">
@@ -299,4 +316,4 @@ const ShopPage: React.FC = () => {
 };
 
 export default ShopPage;
-                    
+                                                                         
