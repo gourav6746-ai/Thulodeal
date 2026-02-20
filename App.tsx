@@ -33,6 +33,14 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode, adminOnly?: boolean 
   return <>{children}</>;
 };
 
+// Home route: logged in users go to /shop, guests see Home
+const HomeRoute: React.FC = () => {
+  const { currentUser, loading } = useAuth();
+  if (loading) return null;
+  if (currentUser) return <Navigate to="/shop" replace />;
+  return <Home />;
+};
+
 const App: React.FC = () => {
   return (
     <AuthProvider>
@@ -43,7 +51,7 @@ const App: React.FC = () => {
             <main className="flex-grow">
               <Routes>
                 {/* Public Routes */}
-                <Route path="/" element={<Home />} />
+                <Route path="/" element={<HomeRoute />} />
                 <Route path="/shop" element={<ShopPage />} />
                 <Route path="/product/:id" element={<ProductDetailPage />} />
                 <Route path="/login" element={<LoginPage />} />
