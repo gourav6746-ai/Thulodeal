@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -13,6 +12,7 @@ import ProductDetailPage from './pages/ProductDetailPage';
 import LoginPage from './pages/LoginPage';
 import OrderHistoryPage from './pages/OrderHistoryPage';
 import CheckoutPage from './pages/CheckoutPage';
+import UserProfilePage from './pages/UserProfilePage';
 
 // Admin Pages
 import AdminDashboard from './admin/AdminDashboard';
@@ -20,16 +20,14 @@ import AdminAddProduct from './admin/AdminAddProduct';
 import AdminEditProduct from './admin/AdminEditProduct';
 import AdminProductList from './admin/AdminProductList';
 import AdminOrderList from './admin/AdminOrderList';
-import AdminPromoManager from './admin/AdminPromoManager'; // New
-import AdminBundleCurator from './admin/AdminBundleCurator'; // New
+import AdminPromoManager from './admin/AdminPromoManager';
+import AdminBundleCurator from './admin/AdminBundleCurator';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode, adminOnly?: boolean }> = ({ children, adminOnly }) => {
   const { currentUser, isAdmin, loading } = useAuth();
-  
   if (loading) return null;
   if (!currentUser) return <Navigate to="/login" />;
   if (adminOnly && !isAdmin) return <Navigate to="/" />;
-  
   return <>{children}</>;
 };
 
@@ -57,6 +55,7 @@ const App: React.FC = () => {
                 <Route path="/login" element={<LoginPage />} />
 
                 {/* User Routes */}
+                <Route path="/profile" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />
                 <Route path="/orders" element={<ProtectedRoute><OrderHistoryPage /></ProtectedRoute>} />
                 <Route path="/checkout" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
 
